@@ -98,17 +98,17 @@ check_tool() {
     echo "❌  Missing: $t"
     case "$t" in
       samtools)
-        echo "    Install Samtools: https://www.htslib.org/download/ | conda install -c bioconda samtools" ;;
+        echo "    Install Samtools: https://www.htslib.org/download/ | mamba install -c bioconda samtools" ;;
       minimap2)
-        echo "    Install Minimap2: https://github.com/lh3/minimap2 | conda install -c bioconda minimap2" ;;
+        echo "    Install Minimap2: https://github.com/lh3/minimap2 | mamba install -c bioconda minimap2" ;;
       bedtools)
-        echo "    Install BEDTools: https://github.com/arq5x/bedtools2 | conda install -c bioconda bedtools" ;;
+        echo "    Install BEDTools: https://github.com/arq5x/bedtools2 | mamba install -c bioconda bedtools" ;;
       bamCoverage)
-        echo "    Install deepTools (bamCoverage): https://deeptools.readthedocs.io | conda install -c bioconda deeptools" ;;
+        echo "    Install deepTools (bamCoverage): https://deeptools.readthedocs.io | mamba install -c bioconda deeptools" ;;
       liftoff)
-        echo "    Install Liftoff: https://github.com/agshumate/liftoff | conda install -c bioconda liftoff" ;;
+        echo "    Install Liftoff: https://github.com/agshumate/liftoff | mamba install -c bioconda liftoff" ;;
       makeblastdb|blastn)
-        echo "    Install BLAST+: https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/ | conda install -c bioconda blast" ;;
+        echo "    Install BLAST+: https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/ | mamba install -c bioconda blast" ;;
       awk)
         echo "    Install awk (gawk): via system package manager (e.g., apt, yum, brew)." ;;
     esac
