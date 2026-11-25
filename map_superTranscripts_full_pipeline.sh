@@ -19,7 +19,10 @@ OUTROOT=$(realpath -m "${OUTROOT:-SuperTranscript_mapping_$(date +%Y%m%d_%H%M%S)
 [[ ! -e $OUTROOT ]] || { echo "Output already exists: $OUTROOT (choose a new OUTROOT)" >&2; exit 1; }
 mkdir -p "$OUTROOT"/{logs,alignments,bed,bigwig,liftoff,qc,annotation,jbrowse_tracks,tmp}
 exec > >(tee -a "$OUTROOT/logs/pipeline.log") 2>&1
-trap 'echo "FAILED at line $LINENO" >&2' ERR
+log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+trap 'rc=$?; log "FAILED at line $LINENO (exit $rc): $BASH_COMMAND" >&2' ERR
+log "Starting superTranscript mapping | CPUs=$THREADS | output=$OUTROOT"
+log "Checking software dependencies and input files"
 for t in samtools minimap2 bedtools python3 bgzip tabix; do command -v "$t" >/dev/null || { echo "Missing dependency: $t"; exit 1; }; done
 if [[ $RUN_LIFTOFF == 1 ]]; then
     command -v liftoff >/dev/null || { echo "Missing dependency: liftoff. Activate the environment containing Liftoff or install it with mamba install -c conda-forge -c bioconda liftoff." >&2; exit 1; }
@@ -27,6 +30,7 @@ fi
 for f in "$SUPERTRANSCRIPTS" "$SIM_GENOME" "$MEL_GENOME" "$SIM_GTF" "$MEL_GTF"; do [[ -s $f ]] || { echo "Missing $f"; exit 1; }; done
 if [[ $RUN_LIFTOFF == 1 ]]; then [[ -s $SUPERTRANSCRIPT_GTF ]]; fi
 if [[ -n $DE_LIST ]]; then DE_LIST=$(realpath "$DE_LIST"); [[ -s $DE_LIST ]]; fi
+log "Recording tool versions and input SHA256 checksums (may take a moment)"
 {
  echo "Started $(date -Is)"; echo "THREADS=$THREADS LIFT_DISTANCES=$LIFT_DISTANCES LIFT_MM2_OPTIONS=$LIFT_MM2_OPTIONS"
  minimap2 --version; samtools --version; bedtools --version
@@ -34,9 +38,11 @@ if [[ -n $DE_LIST ]]; then DE_LIST=$(realpath "$DE_LIST"); [[ -s $DE_LIST ]]; fi
  sha256sum "$SUPERTRANSCRIPTS" "$SIM_GENOME" "$MEL_GENOME" "$SIM_GTF" "$MEL_GTF"
  if [[ $RUN_LIFTOFF == 1 ]]; then sha256sum "$SUPERTRANSCRIPT_GTF"; fi
 } > "$OUTROOT/logs/provenance.txt"
+log "Provenance recorded in $OUTROOT/logs/provenance.txt"
+log "Preparing indexed working copies of FASTA inputs"
 # Copy inputs used by index-writing tools, to avoid modifying originals.
 for pair in "query:$SUPERTRANSCRIPTS" "D_simulans:$SIM_GENOME" "D_melanogaster:$MEL_GENOME"; do
- name=${pair%%:*}; f=${pair#*:}; cp "$f" "$OUTROOT/tmp/$name.fa"; samtools faidx "$OUTROOT/tmp/$name.fa"
+ name=${pair%%:*}; f=${pair#*:}; log "Copying and indexing $name: $f"; cp "$f" "$OUTROOT/tmp/$name.fa"; samtools faidx "$OUTROOT/tmp/$name.fa"
 done
 QUERY="$OUTROOT/tmp/query.fa"
 # Validate sequence IDs and bounds; distinguish source vs genomic annotation.
@@ -59,6 +65,7 @@ if bad: print(*bad[:10],sep='\n')
 if bad or not counts: sys.exit(1)
 PY
 if [[ $RUN_LIFTOFF == 1 ]]; then
+ log "Validating Necklace source annotation against superTranscript coordinates"
  python3 "$OUTROOT/tmp/validate.py" "$QUERY.fai" "$SUPERTRANSCRIPT_GTF" || { echo 'Liftoff source annotation must use SuperDuper FASTA coordinates. Set SUPERTRANSCRIPT_GTF to the original Necklace annotation or RUN_LIFTOFF=0.'; exit 1; }
  cp "$SUPERTRANSCRIPT_GTF" "$OUTROOT/tmp/source.${SUPERTRANSCRIPT_GTF##*.}"
  SOURCE="$OUTROOT/tmp/source.${SUPERTRANSCRIPT_GTF##*.}"
@@ -73,16 +80,21 @@ if not ids or missing: sys.exit(f'Empty or unknown DE IDs: {sorted(missing)[:20]
 open(out,'w').write('\n'.join(ids)+'\n')
 PY
 fi
+log "Input preparation complete: $(wc -l < "$QUERY.fai") superTranscript sequences"
 SORT_THREADS=1
 MAP_THREADS=$((THREADS-3))
 for species in D_simulans D_melanogaster; do
- echo "Mapping $species"
+ log "========== $species: starting analysis =========="
  genome="$OUTROOT/tmp/$species.fa"
  if [[ $species == D_simulans ]]; then refgtf=$SIM_GTF; else refgtf=$MEL_GTF; fi
+ log "$species | Validating reference annotation coordinates"
  python3 "$OUTROOT/tmp/validate.py" "$genome.fai" "$refgtf"
  bam="$OUTROOT/alignments/${species}_all.bam"
+ log "$species | Aligning all superTranscripts with Minimap2 ($MAP_THREADS mapping threads); sorting BAM concurrently"
  minimap2 -ax splice:hq -u b --secondary=yes -N 5 --eqx -t "$MAP_THREADS" "$genome" "$QUERY" | samtools sort -@ "$SORT_THREADS" -m 1G -o "$bam"
+ log "$species | Alignment and sorting complete; checking and indexing BAM"
  samtools quickcheck "$bam"; samtools index "$bam"
+ log "$species | Computing mapping QC (flag counts, query coverage and identity)"
  samtools flagstat "$bam" > "$OUTROOT/qc/${species}_flagstat.txt"
  # One row per alignment; explicit query coverage and identity (excluding introns).
  samtools view "$bam" | python3 -c '
@@ -99,12 +111,15 @@ for line in sys.stdin:
     print(f[0],flag,f[2],f[3],f[4],qlen,a,f"{a/qlen:.6f}",identity,sep="\t")
 ' "$QUERY.fai" > "$OUTROOT/qc/${species}_alignments.tsv"
 
+ log "$species | Extracting primary mapped alignments"
  primary="$OUTROOT/alignments/${species}_primary.bam"
  samtools view -b -F 2308 -o "$primary" "$bam"; samtools index "$primary"
+ log "$species | Preparing JBrowse reference assembly and indexed reference annotation"
  track="$OUTROOT/jbrowse_tracks/$species"; mkdir -p "$track"
  cp "$genome" "$genome.fai" "$primary" "$primary.bai" "$track/"
  awk -F '\t' 'BEGIN{OFS="\t"} !/^#/ && NF==9' "$refgtf" | LC_ALL=C sort -k1,1 -k4,4n | bgzip -c > "$track/reference.gtf.gz"
  tabix -p gff "$track/reference.gtf.gz"
+ log "$species | Generating BED12 and split alignment-block tracks"
  for mode in all primary; do
   b="$OUTROOT/alignments/${species}_${mode}.bam"
   bedtools bamtobed -bed12 -i "$b" > "$OUTROOT/bed/${species}_${mode}.bed12"
@@ -112,6 +127,7 @@ for line in sys.stdin:
  done
  cp "$OUTROOT/bed/${species}_primary.bed12" "$track/"
  # Raw alignment-block depth, not expression; split at N and D.
+ log "$species | Computing raw alignment depth (not RNA expression)"
  bedtools genomecov -ibam "$primary" -bg -split > "$OUTROOT/bigwig/${species}.bedgraph"
  if command -v bedGraphToBigWig >/dev/null; then
   cut -f1,2 "$genome.fai" > "$OUTROOT/tmp/$species.sizes"
@@ -120,10 +136,12 @@ for line in sys.stdin:
    bedGraphToBigWig "$OUTROOT/tmp/$species.sorted.bedgraph" "$OUTROOT/tmp/$species.sizes" "$track/${species}_alignment_depth.bw"
   fi
  fi
+ log "$species | Comparing primary alignment blocks with reference exons"
  # Candidate reference gene overlaps; keep raw rows for isoform-aware aggregation.
  awk -F '\t' '$3=="exon"' "$refgtf" > "$OUTROOT/tmp/$species.exons.gtf"
  bedtools intersect -a "$OUTROOT/bed/${species}_primary_blocks.bed" -b "$OUTROOT/tmp/$species.exons.gtf" -wo > "$OUTROOT/annotation/${species}_exon_overlaps.tsv"
  if [[ -n $DE_LIST ]]; then
+  log "$species | Extracting requested DE-specific tracks"
   samtools view -b -N "$OUTROOT/tmp/de.ids" -o "$track/${species}_DE.bam" "$primary"
   samtools index "$track/${species}_DE.bam"
   bedtools bamtobed -bed12 -i "$track/${species}_DE.bam" > "$track/${species}_DE.bed12"
@@ -138,7 +156,10 @@ for line in sys.stdin:
     if ! awk -F '\t' '$3=="gene" {found=1} END{exit !found}' "$SOURCE"; then opts+=(-infer_genes); fi
     if ! awk -F '\t' '$3=="transcript" || $3=="mRNA" {found=1} END{exit !found}' "$SOURCE"; then opts+=(-infer_transcripts); fi
    fi
-   if (cd "$dest"; liftoff "$genome" "$QUERY" -g "$SOURCE" -o projected.annotation -u unmapped.txt -dir intermediate -p "$THREADS" -d "$d" -a 0.5 -s 0.5 "${opts[@]}") > "$dest/liftoff.log" 2>&1; then
+   log "$species | Liftoff trial: distance=$d, coverage=0.5, identity=0.5, options=${opts[*]:-default}"
+   log "$species | Liftoff detailed progress: $dest/liftoff.log"
+   if (cd "$dest"; liftoff "$genome" "$QUERY" -g "$SOURCE" -o projected.annotation -u unmapped.txt -dir intermediate -p "$THREADS" -d "$d" -a 0.5 -s 0.5 "${opts[@]}") 2>&1 | tee "$dest/liftoff.log"; then
+    log "$species | Liftoff distance=$d finished; validating projected annotation"
     # Liftoff preserves source format; detect from output rather than suffix.
     if grep -m1 -q '^##gff-version 3' "$dest/projected.annotation"; then ext=gff3; else ext=${SOURCE##*.}; fi
     cp "$dest/projected.annotation" "$dest/projected.$ext"
@@ -147,11 +168,13 @@ for line in sys.stdin:
      if [[ $ext == gtf ]] && command -v gffread >/dev/null; then
       gffread -E -F --keep-genes "$dest/projected.$ext" -o "$track/Necklace_d${d}.converted.gff3" 2> "$dest/gffread.log" || { rm -f "$track/Necklace_d${d}.converted.gff3"; echo "GFF conversion failed; native projection retained"; }
      fi
+     log "$species | Liftoff distance=$d: projection validated and exported"
      printf '%s\t%s\t%s\n' "$species" "$d" OK >> "$OUTROOT/qc/liftoff_status.tsv"
-    else printf '%s\t%s\t%s\n' "$species" "$d" INVALID >> "$OUTROOT/qc/liftoff_status.tsv"; fi
-   else printf '%s\t%s\t%s\n' "$species" "$d" FAILED >> "$OUTROOT/qc/liftoff_status.tsv"; fi
+    else log "$species | Liftoff distance=$d: INVALID projection"; printf '%s\t%s\t%s\n' "$species" "$d" INVALID >> "$OUTROOT/qc/liftoff_status.tsv"; fi
+   else log "$species | Liftoff distance=$d: FAILED; see $dest/liftoff.log"; printf '%s\t%s\t%s\n' "$species" "$d" FAILED >> "$OUTROOT/qc/liftoff_status.tsv"; fi
   done
  fi
+ log "========== $species: analysis finished (check Liftoff trial status) =========="
 done
 printf 'Finished %s\nOutputs: %s\n' "$(date -Is)" "$OUTROOT"
 if [[ $RUN_LIFTOFF == 1 ]] && grep -Eq 'FAILED|INVALID' "$OUTROOT/qc/liftoff_status.tsv"; then echo 'One or more Liftoff trials failed; inspect logs. Mapping outputs retained.'; exit 2; fi
