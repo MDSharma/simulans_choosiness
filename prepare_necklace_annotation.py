@@ -30,6 +30,22 @@ types are compatibility labels, not validated biological gene models.
 SuperDuper.gff. Require gene_id/seqid agreement and valid coordinates,
 but audit rather than reject transcript label differences; retain original
 attributes in source_transcript_id_mismatches.tsv. No blocks are discarded.
+
+Confirmed diagnostic (2026-11-25):
+The set of 165 IDs extracted by the original Liftoff run is exactly equal
+to the set of 165 superTranscripts with transcript_id != seqid in the
+original graph-block annotation (intersection=165; set equality=True).
+Examples retain Trinity transcript IDs distinct from REL- gene cluster IDs.
+This establishes a perfect association with identifier relationships, not
+proof of the internal Liftoff/gffutils mechanism. The original Liftoff
+input was the whole-sequence GTF; the mismatch audit used the graph GFF.
+The explicit derived hierarchy, safe IDs and source orientation were
+changed jointly, so their individual effects have not been isolated.
+After preparation, all 15319 genes were extracted in every tested trial;
+all 142593 source graph blocks passed coordinate and partition checks.
+At distance=2, whole/block gene recovery was 14541/14503 in D. simulans
+and 14335/14315 in D. melanogaster. Distinct projected graph block IDs:
+96807 and 96012, respectively; this is not full block sequence coverage.
 References:
  Davidson et al. 2017 doi:10.1186/s13059-017-1284-1
  Davidson & Oshlack 2018 doi:10.1093/gigascience/giy045
