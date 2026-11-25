@@ -26,6 +26,10 @@ FAIR: deterministic IDs in FASTA order, reversible TSV lookup, standard
 FASTA/GFF3, SHA256 input and script fingerprints, software versions,
 validation report, original inputs untouched. The derived gene/mRNA/exon
 types are compatibility labels, not validated biological gene models.
+2026-11-25: source transcript_id differs from seqid at line 139020 in
+SuperDuper.gff. Require gene_id/seqid agreement and valid coordinates,
+but audit rather than reject transcript label differences; retain original
+attributes in source_transcript_id_mismatches.tsv. No blocks are discarded.
 References:
  Davidson et al. 2017 doi:10.1186/s13059-017-1284-1
  Davidson & Oshlack 2018 doi:10.1093/gigascience/giy045
@@ -85,6 +89,7 @@ def prepare(args):
         raise ValueError("Empty FASTA")
     log("Reading original Lace graph blocks (GTF-style attributes in .gff)")
     blocks = collections.defaultdict(list)
+    transcript_id_mismatches = []
     with args.blocks.open() as handle:
         for n, line in enumerate(handle, 1):
             if line.startswith("#") or not line.strip():
@@ -97,8 +102,15 @@ def prepare(args):
                 raise ValueError(f"Out-of-bounds block at line {n}")
             for key in ("gene_id", "transcript_id"):
                 m = re.search(r'(?:^|;\s*)' + key + r'\s+"([^"]+)"', f[8])
-                if not m or m.group(1) != f[0]:
-                    raise ValueError(f"{key} differs from sequence ID at line {n}")
+                if not m:
+                    raise ValueError(f"Missing or malformed {key} at line {n}")
+                if m.group(1) != f[0]:
+                    if key == "gene_id":
+                        raise ValueError(f"gene_id differs from sequence ID at line {n}: {m.group(1)!r} vs {f[0]!r}")
+                    # Graph blocks are located by seqid and coordinates, not by
+                    # legacy transcript labels. Preserve discrepancies for audit;
+                    # the derived hierarchy uses new, unique transcript IDs.
+                    transcript_id_mismatches.append((n, f[0], start, end, m.group(1), f[8]))
             blocks[f[0]].append((start, end))
     missing = set(sequences) - set(blocks)
     if missing:
@@ -116,7 +128,12 @@ def prepare(args):
             raise ValueError(f"Blocks do not cover end of {name}")
     nblocks = sum(map(len, blocks.values()))
     log(f"Validated {len(sequences)} sequences and {nblocks} graph blocks")
+    log(f"Source transcript_id mismatches: {len(transcript_id_mismatches)} rows; retaining original labels in audit TSV")
     args.out.mkdir(parents=True, exist_ok=False)
+    with (args.out / "source_transcript_id_mismatches.tsv").open("w") as audit:
+        writer = csv.writer(audit, delimiter="\t", lineterminator="\n")
+        writer.writerow(["source_line", "original_id", "start", "end", "source_transcript_id", "source_attributes"])
+        writer.writerows(transcript_id_mismatches)
     with (args.out / "SuperDuper.standardised.fasta").open("w") as fa, \
          (args.out / "SuperDuper.whole.gff3").open("w") as whole, \
          (args.out / "SuperDuper.blocks.gff3").open("w") as block, \
@@ -160,6 +177,8 @@ def prepare(args):
     with (args.out / "validation_summary.tsv").open("w") as out:
         out.write("metric\tvalue\n")
         for key, val in (("sequences", len(sequences)), ("graph_blocks", nblocks), ("whole_exons", len(sequences)),
+                         ("source_transcript_id_mismatch_rows", len(transcript_id_mismatches)),
+                         ("source_transcript_id_mismatch_sequences", len({r[1] for r in transcript_id_mismatches})),
                          ("python", sys.version.split()[0]), ("gffutils", gffutils.__version__),
                          ("fasta_path", args.fasta.resolve()), ("fasta_sha256", digest(args.fasta)),
                          ("blocks_path", args.blocks.resolve()), ("blocks_sha256", digest(args.blocks)),
