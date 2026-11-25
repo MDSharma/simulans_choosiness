@@ -1,5 +1,53 @@
 #!/usr/bin/env bash
 # SuperTranscript genome mapping; M. D. Sharma, revised pipeline.
+# ----------------------------------------------------------------------
+# SCIENTIFIC RATIONALE AND FAIR-ORIENTED PIPELINE DESIGN
+# Author: M. D. Sharma | ORCID: 0000-0002-9957-3153
+# Repository: https://github.com/MDSharma/simulans_choosiness
+#
+# Objective: locate Necklace SuperDuper sequences against D. simulans and
+# D. melanogaster, preserve alignment evidence and compare native annotations.
+# The original BLAT PSL -> GTF converter correctly converted alignment
+# coordinates but did not project original Necklace features, distinguish
+# multiple loci, or establish genuine exon boundaries. Direct splice-aware
+# Minimap2 gives BAM/BED12 and QC; Liftoff is an annotation-aware complement,
+# not a proven replacement or a guarantee of orthology or native isoforms.
+#
+# Necklace/Lace: SuperDuper.fasta is a linear union of sequence per inferred
+# gene cluster. SuperDuper.gtf represents whole sequences for counting;
+# SuperDuper.gff contains graph-derived blocks. Neither is a conventional
+# genomic gene annotation. Splice-junction-derived blocks are distinct.
+# Historical run (2026-11-25, SuperTranscript_mapping_20261125_215819):
+# 15319 sequences; 15064 and 14940 primary mappings to simulans and
+# melanogaster, respectively. Median primary query coverage 99.92% / 99.02%;
+# median identity 99.51% / 93.37%. Liftoff extracted only 165 sequences
+# (163 REL-), independently of distance factor or target. This was an
+# extraction/hierarchy problem, not evidence of widespread mapping failure.
+# Exact cause remains unconfirmed. Do not interpret the historical Liftoff
+# status OK (coordinate validation only) as complete annotation recovery.
+# Use prepare_necklace_annotation.py and evaluate_liftoff_projection.sh
+# for explicit hierarchy, reversible IDs, extraction audits and controlled
+# whole-vs-block projection comparisons without repeating direct mapping.
+# The operational code below is deliberately retained for reproducibility.
+#
+# Findable: named species, stage-specific outputs, timestamped progress.
+# Accessible: open formats FASTA, BAM/BAI, BED12, GTF/GFF3, TSV, BigWig;
+# access permissions, licensing and archival deposition are separate decisions.
+# Interoperable: original Necklace IDs for downstream expression/Trinotate;
+# reference-coordinate tracks kept separately by species.
+# Reusable: tool versions, input SHA256, retained intermediates, exact
+# parameters, original inputs preserved. Raw alignment depth is not RNA
+# expression; reference exon overlaps are candidate evidence, not definitive
+# gene assignments. FAIR-oriented design is not a certification.
+#
+# References:
+# Davidson et al. 2017 doi:10.1186/s13059-017-1284-1
+# Davidson & Oshlack 2018 doi:10.1093/gigascience/giy045
+# Shumate & Salzberg 2021 doi:10.1093/bioinformatics/btaa1016
+# Li 2018 doi:10.1093/bioinformatics/bty191
+# https://github.com/Oshlack/necklace/wiki/Output
+# https://github.com/Oshlack/Lace/wiki/Usage-Documentation
+# ----------------------------------------------------------------------
 set -Eeuo pipefail
 WORKDIR=$(realpath "${WORKDIR:-$PWD}")
 cd "$WORKDIR"
