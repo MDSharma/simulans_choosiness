@@ -13,8 +13,40 @@ for sp,label in [("D_simulans","D. simulans"),("D_melanogaster","D. melanogaster
     tracks.append({"type":"AlignmentsTrack","trackId":sp+"_primary","name":"Minimap2 superTranscript alignments","assemblyNames":[sp],"adapter":{"type":"BamAdapter","bamLocation":loc(sp+"_primary.bam"),"index":{"location":loc(sp+"_primary.bam.bai"),"indexType":"BAI"}}})
     for name,title,kind in [("reference.gtf.gz","Native reference genes","Gtf"),("Necklace_Liftoff_whole_d2.gff3.gz","Liftoff whole superTranscripts","Gff3"),("Necklace_Liftoff_blocks_d2.gff3.gz","Liftoff graph blocks","Gff3"),("Necklace_CIGAR_blocks.gff3.gz","CIGAR graph block fragments","Gff3"),("Necklace_counted_blocks.gff3.gz","Recovered blocks.gtf (structural only)","Gff3")]:
         if name.startswith("Necklace_counted") and not (root/sp/name).exists(): continue
-        tracks.append({"type":"FeatureTrack","trackId":sp+"_"+name.split(".")[0],"name":title,"assemblyNames":[sp],"adapter":{"type":kind+"TabixAdapter",kind.lower()+"GzLocation":loc(name),"index":{"location":loc(name+".tbi"),"indexType":"TBI"}}})
-(root/"config.json").write_text(json.dumps({"assemblies":assemblies,"tracks":tracks},indent=2)+"\n")
+        tracks.append({"type":"FeatureTrack","trackId":sp+"_"+name.split(".")[0],"name":title,"assemblyNames":[sp],"adapter":{"type":kind+"TabixAdapter",("gffGzLocation" if kind=="Gff3" else "gtfGzLocation"):loc(name),"index":{"location":loc(name+".tbi"),"indexType":"TBI"}}})
+config={"assemblies":assemblies,"tracks":tracks}
+(root/"config.json").write_text(json.dumps(config,indent=2)+"\n")
+# v4 Desktop must use explicit local paths on the recipient's machine.
+# PowerShell requires no Python on Windows and resolves the package root
+# at runtime rather than embedding Athena paths in the shared session.
+(root/"Create_Windows_JBrowse.ps1").write_text(r'''$ErrorActionPreference = 'Stop'
+$root = $PSScriptRoot
+$config = Get-Content -LiteralPath (Join-Path $root 'config.json') -Raw | ConvertFrom-Json
+function Convert-Location($node) {
+    if ($null -eq $node) { return }
+    if ($node -is [System.Array]) {
+        foreach ($item in $node) { Convert-Location $item }
+    } elseif ($node -is [System.Management.Automation.PSCustomObject]) {
+        if ($node.locationType -eq 'UriLocation') {
+            $path = Join-Path $root $node.uri
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing file: $path" }
+            $path = (Resolve-Path -LiteralPath $path).Path
+            $node.PSObject.Properties.Remove('uri')
+            $node.locationType = 'LocalPathLocation'
+            $node | Add-Member -NotePropertyName localPath -NotePropertyValue $path -Force
+        } else {
+            foreach ($prop in $node.PSObject.Properties) { Convert-Location $prop.Value }
+        }
+    }
+}
+Convert-Location $config
+$out = Join-Path $root 'Necklace_Windows.jbrowse'
+$json = $config | ConvertTo-Json -Depth 100
+[System.IO.File]::WriteAllText($out, $json, (New-Object System.Text.UTF8Encoding($false)))
+Write-Host "Created $out"
+Write-Host "Open this file in JBrowse 2 Desktop. Regenerate after moving the folder."
+''',encoding="utf-8")
+
 (root/"README.md").write_text("""# Necklace superTranscript genome browser handover
 
 Two assemblies, independent structural projections, all native gene candidates.
@@ -22,7 +54,7 @@ All paths in config.json are relative to this folder. No Athena paths needed.
 
 ## Open the browser
 
-Use JBrowse 2 Desktop or an existing JBrowse 2 web installation. For a web
+On Windows with Desktop v4.3.0, open PowerShell in this folder and run:\n\n    powershell -NoProfile -ExecutionPolicy Bypass -File .\\Create_Windows_JBrowse.ps1\n\nOpen Necklace_Windows.jbrowse in Desktop. The generated session uses absolute\nlocal paths, so repeat on each recipient's machine or after moving the folder.\nDo not share the generated machine-specific session. Keep config.json for web.\n\nFor a web
 installation copied into web/ at packaging, serve this entire folder over HTTP
 and open web/index.html?config=../config.json. Do not open through file://.
 Use a server supporting HTTP byte ranges (e.g. Node http-server); from this
