@@ -47,49 +47,5 @@ Write-Host "Created $out"
 Write-Host "Open this file in JBrowse 2 Desktop. Regenerate after moving the folder."
 ''',encoding="utf-8")
 
-(root/"README.md").write_text("""# Necklace superTranscript genome browser handover
-
-Two assemblies, independent structural projections, all native gene candidates.
-All paths in config.json are relative to this folder. No Athena paths needed.
-
-## Open the browser
-
-On Windows with Desktop v4.3.0, open PowerShell in this folder and run:\n\n    powershell -NoProfile -ExecutionPolicy Bypass -File .\\Create_Windows_JBrowse.ps1\n\nOpen Necklace_Windows.jbrowse in Desktop. The generated session uses absolute\nlocal paths, so repeat on each recipient's machine or after moving the folder.\nDo not share the generated machine-specific session. Keep config.json for web.\n\nFor a web
-installation copied into web/ at packaging, serve this entire folder over HTTP
-and open web/index.html?config=../config.json. Do not open through file://.
-Use a server supporting HTTP byte ranges (e.g. Node http-server); from this
-folder, run npx http-server . -p 8080 -c-1 and visit
-http://localhost:8080/web/index.html?config=../config.json .
-If web/ is absent, the folder contains all data and configuration but not the
-browser application. Install JBrowse 2 separately or copy its web release into
-web/. No external sequence or track data is needed.
-
-Select either assembly in a linear genome view and open the desired tracks.
-BED12 is supplied for optional manual import. Search native genes using the
-annotation tables; no text search index is built.
-
-## Interpretation and handover
-
-* Native annotation is the reference GTF. Minimap2 BAM shows primary alignments.
-* Liftoff whole and graph-block tracks use audited d=2 projections. IDs are
-  linked to original Necklace IDs in the lookup table.
-* CIGAR graph-block fragments are not biological exons; alignment orientation
-  need not equal transcriptional strand.
-* Recovered blocks.gtf projections are structural only. Their source row IDs
-  are not limma exon IDs. Confirm count matrix, feature ordering and R
-  make.unique() identifiers before attaching statistical results.
-* tables/master_annotation.tsv contains all 15,319 source IDs; gene candidates
-  are overlaps, not proof of orthology. Preserve ambiguous assignments.
-* Historical count matrices contain 142,593 and 121,757 rows respectively.
-  The manuscript reports the latter; exact correspondence remains unverified.
-* Check the final group coding (commented group definitions and plotting labels
-  in Limma_alt_splice.R disagree).
-* Integrate the two Trinotate reports separately using the supplied script;
-  the original pipeline inputs and full scripts are maintained in the GitHub
-  repository MDSharma/simulans_choosiness. Statistical and functional annotation
-  integration is intentionally left to the analyst. The supplied scripts are
-  copies for provenance and are not a standalone rerunnable mapping pipeline.
-
-Validate copied files with sha256sum -c SHA256SUMS from the package root.
-""")
+(root/"README.md").write_text("# SuperTranscript mapping and annotation – female choosiness\n\nI've put together the genome browser files for both D. simulans and\nD. melanogaster using the final Necklace assembly (SuperDuper.fasta).\nThe idea is to be able to look at our superTranscripts alongside the\nexisting gene models in both species.\n\n## JBrowse\n\nI've used JBrowse 2 Desktop (v4.3.0) on Windows. Download the whole folder\nfrom OneDrive and keep the directory structure intact. Run the following\nfrom PowerShell in the downloaded folder:\n\n    powershell -NoProfile -ExecutionPolicy Bypass -File .\\Create_Windows_JBrowse.ps1\n\nOpen the resulting Necklace_Windows.jbrowse file in JBrowse. The script\nsets the local paths to the genome and track files, so run it again if\nyou move the folder. The config.json file uses relative paths and is\nintended for JBrowse Web.\n\nIf using the web version, with the JBrowse application installed in\nweb/, serve the package directory over HTTP with byte-range support\n(e.g. npx http-server . -p 8080 -c-1) and open\nhttp://localhost:8080/web/index.html?config=../config.json.\n\n## Tracks\n\nThere is a separate directory for each species, containing the reference\nFASTA and annotation, the primary Minimap2 alignments (BAM and BED12),\nand the Liftoff projections. I've retained the whole-superTranscript\nand graph-block Liftoff results separately (both using d=2).\n\nI've also projected the original Necklace graph blocks directly through\nthe Minimap2 alignments. This recovered more of the original blocks\nthan Liftoff, although the two methods generally agreed where both\nrecovered the same block. The fragments in this track should not be\ntreated as individual genomic exons.\n\nWhere available, I've included a separate projection of blocks.gtf\nfrom the original DE_expression_analysis directory. This is useful\nfor looking at the structure of the superTranscripts in the context\nof the differential exon usage analysis.\n\nThe BED12 files are available for manual import if needed. I haven't\nbuilt a text search index; the tables below can be used to find loci.\n\n## Annotation tables\n\nThe main file is tables/master_annotation.tsv, with one row for each\nof the 15,319 superTranscripts. The species-specific gene candidate\ntables contain the details of the overlaps with the reference\nannotations. Some superTranscripts overlap more than one gene, so\nI've retained the alternatives rather than assign a single gene name\nin every case. These are candidate gene associations, not confirmed\northologues. The original Necklace IDs have been retained throughout;\nthe lookup table links these to the IDs used for Liftoff.\n\nThe mapping and projection summaries are also in tables/, and the\noriginal superTranscript sequence and relevant annotations are in\nsource/.\n\n## Remaining annotation work\n\nThe functional annotation and statistical results still need to be\nadded. The integration script in scripts/ accepts the full Swiss-Prot\nand D. melanogaster-specific Trinotate reports separately.\n\nOne thing to check when adding the limma results: there are 142,593\nfeatures in the original graph annotation/count matrix and 121,757\nrows in TESTfeaturecounts.txt, the latter matching the number in\nthe manuscript. We still need to confirm the correspondence between\nblocks.gtf and the final limma feature IDs (including the row order\nused with make.unique()). The projected blocks.gtf track currently\nuses source row IDs, not the IDs generated by limma.\n\nIt would also be worth checking the group coding in the final R\nworkspace, as the comments at the beginning of Limma_alt_splice.R\nand the labels in the plotting section are reversed.\n\nI've kept the mapping scripts and the notes on the approaches we\ntried in https://github.com/MDSharma/simulans_choosiness. The copies\nin scripts/ are there for reference; the complete mapping pipeline\nand its original inputs are not included in this browser folder.\n\nIf needed, the original package files can be checked on Linux using\nsha256sum -c SHA256SUMS.\n\nMD\n",encoding="utf-8")
 print("Wrote portable config.json and README.md",flush=True)
